@@ -1,8 +1,8 @@
 [package]
-name = "usbd-human-interface-device"
+name = "xous-usb-hid"
 version = "0.4.3"
 edition = "2021"
-description = "Batteries included embedded USB HID library for usb-device. Includes concrete Keyboard (boot and NKRO), Mouse, Joystick and Consumer Control implementations as well as support for building your own HID classes."
+description = "Batteries included embedded USB HID library for usb-device. Forked from usbd-human-interface-device"
 keywords = ["hid", "usb-device", "usb", "keyboard", "mouse"]
 categories = ["no-std", "embedded"]
 authors = ["DLKJ"]
@@ -24,7 +24,7 @@ option-block = "0.3"
 
 [dev-dependencies]
 env_logger = "0.10"
-usbd-human-interface-device = { path = ".", features = ["log"] }
+xous-usb-hid = { path = ".", features = ["log"] }
 
 [features]
 defmt = ["dep:defmt", "usb-device/defmt"]
