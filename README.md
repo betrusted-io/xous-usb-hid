@@ -9,8 +9,7 @@ Batteries included embedded USB HID library for [`usb-device`](https://crates.io
 Includes Keyboard (boot and NKRO), Mouse, Joystick and Consumer Control implementations as well as
 support for building your own HID classes.
 
-Tested on the RP2040, but should work on any platform supported by
-[`usb-device`](https://crates.io/crates/usb-device).
+While most of the code is the same as [upstream](https://github.com/dlkj/usbd-human-interface-device), this crate is not `no_std` compatible anymore and its code will change according to the necessities of [`xous-core`](https://github.com/betrusted-io/xous-core/). 
 
 Devices created with this library should work with any USB host. Tested on Windows,
 Linux, MacOS and Android.
