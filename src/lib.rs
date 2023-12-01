@@ -1,4 +1,3 @@
-#![no_std]
 #![warn(clippy::pedantic)]
 #![warn(clippy::style)]
 #![warn(clippy::cargo)]
