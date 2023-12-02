@@ -835,3 +835,334 @@ where
         ManagedIdleInterface::new(self.interface_config.allocate(usb_alloc))
     }
 }
+
+
+/// HeapInterfaceConfig is a configuration struct holding parameters to configure
+/// a HeapInterface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeapInterfaceConfig<'a, I, O, R>
+where
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    marker: PhantomData<(I, O, R)>,
+    report_descriptor: std::vec::Vec<u8>,
+    description: Option<&'a str>,
+    protocol: InterfaceProtocol,
+    idle_default: u8,
+    out_endpoint: Option<EndpointConfig>,
+    in_endpoint: EndpointConfig,
+}
+
+impl<'a, I, O, R> Into<InterfaceConfig<'a, I, O, R>> for &HeapInterfaceConfig<'a, I, O, R> 
+where
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    fn into(self) -> InterfaceConfig<'a, I, O, R> {
+        InterfaceConfig { 
+            marker: self.marker, 
+            report_descriptor: &[], 
+            report_descriptor_length: 0, 
+            description: self.description, 
+            protocol: self.protocol, 
+            idle_default: self.idle_default, 
+            out_endpoint: self.out_endpoint, 
+            in_endpoint: self.in_endpoint,
+        }
+    }
+}
+
+/// HeapInterfaceBuilder is a builder interface to construct a HeapInterface.
+#[derive(Clone, Debug)]
+pub struct HeapInterfaceBuilder<'a, I, O, R>
+where
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    config: HeapInterfaceConfig<'a, I, O, R>,
+}
+
+impl<'a, I, O, R> HeapInterfaceBuilder<'a, I, O, R>
+where
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    pub fn new(report_descriptor: std::vec::Vec<u8>) -> BuilderResult<Self> {
+        let report_descriptor = report_descriptor.clone();
+        Ok(HeapInterfaceBuilder {
+            config: HeapInterfaceConfig {
+                marker: PhantomData,
+                report_descriptor,
+                description: None,
+                protocol: InterfaceProtocol::None,
+                idle_default: 0,
+                out_endpoint: None,
+                in_endpoint: EndpointConfig { poll_interval: 20 },
+            },
+        })
+    }
+
+    pub fn boot_device(mut self, protocol: InterfaceProtocol) -> Self {
+        self.config.protocol = protocol;
+        self
+    }
+
+    pub fn idle_default(mut self, duration: MillisDurationU32) -> BuilderResult<Self> {
+        if duration.ticks() == 0 {
+            self.config.idle_default = 0;
+        } else {
+            let scaled_duration = duration.to_millis() / 4;
+
+            if scaled_duration == 0 {
+                //round up for 1-3ms
+                self.config.idle_default = 1;
+            } else {
+                self.config.idle_default =
+                    u8::try_from(scaled_duration).map_err(|_| UsbHidBuilderError::ValueOverflow)?;
+            }
+        }
+        Ok(self)
+    }
+
+    pub fn description(mut self, s: &'a str) -> Self {
+        self.config.description = Some(s);
+        self
+    }
+
+    pub fn with_out_endpoint(mut self, poll_interval: MillisDurationU32) -> BuilderResult<Self> {
+        self.config.out_endpoint = Some(EndpointConfig {
+            poll_interval: u8::try_from(poll_interval.to_millis())
+                .map_err(|_| UsbHidBuilderError::ValueOverflow)?,
+        });
+        Ok(self)
+    }
+
+    pub fn without_out_endpoint(mut self) -> Self {
+        self.config.out_endpoint = None;
+        self
+    }
+
+    pub fn in_endpoint(mut self, poll_interval: MillisDurationU32) -> BuilderResult<Self> {
+        self.config.in_endpoint = EndpointConfig {
+            poll_interval: u8::try_from(poll_interval.to_millis())
+                .map_err(|_| UsbHidBuilderError::ValueOverflow)?,
+        };
+        Ok(self)
+    }
+
+    #[must_use]
+    pub fn build(self) -> HeapInterfaceConfig<'a, I, O, R> {
+        self.config
+    }
+}
+
+/// HeapInterface is a Interface that allows its report descriptor to be heap-allocated.
+pub struct HeapInterface<'a, B, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    inner: Interface<'a, B, I, O, R>,
+    config: HeapInterfaceConfig<'a, I, O, R>,
+
+}
+
+impl<'a, B: UsbBus + 'a, I, O, R> UsbAllocatable<'a, B> for HeapInterfaceConfig<'a, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    type Allocated = HeapInterface<'a, B, I, O, R>;
+
+    fn allocate(self, usb_alloc: &'a UsbBusAllocator<B>) -> Self::Allocated {
+        HeapInterface::new(usb_alloc, self)
+    }
+}
+
+impl<'a, B, I, O, R> DeviceClass<'a> for HeapInterface<'a, B, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    type I = Self;
+
+    fn interface(&mut self) -> &mut Self {
+        self
+    }
+
+    fn reset(&mut self) {
+        <Self as InterfaceClass<'a>>::reset(self);
+    }
+
+    fn tick(&mut self) -> Result<(), UsbHidError> {
+        Ok(())
+    }
+}
+
+impl<'a, B: UsbBus, I, O, R> HeapInterface<'a, B, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    pub fn new(usb_alloc: &'a UsbBusAllocator<B>, config: HeapInterfaceConfig<'a, I, O, R>) -> Self {
+        HeapInterface {
+            inner: Interface::new(usb_alloc, (&config).into()),
+            config: config,
+        }
+    }
+
+    #[allow(dead_code)]
+    fn clear_report_idle(&mut self) {
+        self.inner.clear_report_idle();
+    }
+
+    #[allow(dead_code)]
+    fn get_report_idle(&self, report_id: u8) -> Option<u8> {
+        self.inner.get_report_idle(report_id)
+    }
+
+    #[must_use]
+    pub fn protocol(&self) -> HidProtocol {
+        self.inner.protocol
+    }
+
+    #[must_use]
+    pub fn global_idle(&self) -> MillisDurationU32 {
+        (u32::from(self.inner.global_idle) * 4).millis()
+    }
+
+    #[must_use]
+    pub fn report_idle(&self, report_id: u8) -> Option<MillisDurationU32> {
+        self.inner.report_idle(report_id)
+    }
+
+    pub fn write_report(&mut self, data: &[u8]) -> usb_device::Result<usize> {
+        self.inner.write_report(data)
+    }
+
+    pub fn read_report(&mut self, data: &mut [u8]) -> usb_device::Result<usize> {
+        self.inner.read_report(data)
+    }
+}
+impl<'a, B: UsbBus, I, O, R> InterfaceClass<'a> for HeapInterface<'a, B, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    // Note: the following two methods (hid_descriptor_body and write_descriptors) need to be copy-pasted here
+    // because they reference inner's config hid descriptor slice.
+    // Since we have our heap-allocated one, reference that.
+    fn hid_descriptor_body(&self) -> [u8; 7] {
+        match (HidDescriptorBody {
+            bcd_hid: SPEC_VERSION_1_11,
+            country_code: COUNTRY_CODE_NOT_SUPPORTED,
+            num_descriptors: 1,
+            descriptor_type: DescriptorType::Report,
+            descriptor_length: self.config.report_descriptor.len() as u16,
+        }
+        .pack())
+        {
+            Ok(d) => d,
+            Err(_) => panic!("Failed to pack HidDescriptor"),
+        }
+    }
+
+    fn write_descriptors(&self, writer: &mut DescriptorWriter) -> usb_device::Result<()> {
+        writer.interface_alt(
+            self.inner.id,
+            usb_device::device::DEFAULT_ALTERNATE_SETTING,
+            USB_CLASS_HID,
+            InterfaceSubClass::from(self.config.protocol).into(),
+            self.config.protocol.into(),
+            self.inner.description_index,
+        )?;
+
+        //Hid descriptor
+        writer.write(DescriptorType::Hid.into(), &self.hid_descriptor_body())?;
+
+        //Endpoint descriptors
+        writer.endpoint(&self.inner.in_endpoint)?;
+        if let Some(e) = &self.inner.out_endpoint {
+            writer.endpoint(e)?;
+        }
+
+        Ok(())
+    }
+
+    fn report_descriptor(&self) -> &'_ [u8] {
+        &self.config.report_descriptor
+    }
+
+    fn id(&self) -> InterfaceNumber {
+        self.inner.id()
+    }
+
+    fn get_string(&self, index: StringIndex, _lang_id: u16) -> Option<&'a str> {
+        self.inner.get_string(index, _lang_id)
+    }
+
+    fn reset(&mut self) {
+        InterfaceClass::reset(&mut self.inner)
+    }
+
+    fn set_report(&mut self, data: &[u8]) -> usb_device::Result<()> {
+        self.inner.set_report(data)
+    }
+
+    fn get_report(&self, data: &mut [u8]) -> usb_device::Result<usize> {
+        self.inner.get_report(data)
+    }
+
+    fn get_report_ack(&mut self) -> usb_device::Result<()> {
+        self.inner.get_report_ack()
+    }
+
+    fn set_idle(&mut self, report_id: u8, value: u8) {
+        self.inner.set_idle(report_id, value)
+    }
+
+    fn get_idle(&self, report_id: u8) -> u8 {
+        self.inner.get_idle(report_id)
+    }
+
+    fn set_protocol(&mut self, protocol: HidProtocol) {
+        self.inner.set_protocol(protocol)
+    }
+
+    fn get_protocol(&self) -> HidProtocol {
+        self.inner.get_protocol()
+    }
+}
+
+impl<'a, B, I, O, R>  HeapInterface<'a, B, I, O, R>
+where
+    B: UsbBus,
+    I: InSize,
+    O: OutSize,
+    R: ReportCount,
+{
+    pub fn set_report_descriptor(&mut self, report_descriptor: std::vec::Vec<u8>) -> Result<(), usb_device::UsbError>{
+        if report_descriptor.len() as u16 > u16::MAX {
+            return Err(UsbError::BufferOverflow)
+        }
+
+        self.config.report_descriptor = report_descriptor;
+
+        Ok(())
+    }
+}
